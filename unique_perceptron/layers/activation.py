@@ -35,11 +35,8 @@ class SoftMax(object):
         self.a = np.exp(s - np.max(s, axis=1, keepdims=True))
         self.a = self.a / np.sum(self.a, axis=1, keepdims=True)
         return self.a
-'''    
-    #def backward(self,s): #How to get the derivative of the SoftMax function?
-        #self.d_a = self.forward_propagate(s) * np.identity(self.forward_propagate(s).size) - self.forward_propagate(s).T @ self.forward_propagate(s)
-        
-        #self.d_a = np.eye(s.shape[0])
-        #self.d_a = self.forward_propagate(s) * (self.d_a - self.forward_propagate(s))
-        #return self.d_a
-'''
+
+    def backward(self, s: np.ndarray) -> np.ndarray:
+        #self.d_a = np.diagflat(s) - np.dot(s, s.T) 
+        #return self.d_a 
+        return s

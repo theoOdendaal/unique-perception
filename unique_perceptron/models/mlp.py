@@ -1,7 +1,7 @@
 import numpy as np
 import pickle
 
-from layers.core import HiddenLayer
+from layers.layers import HiddenLayer
 from layers.activation import ReLu, LeakyReLu, Sigmoid, SoftMax
 from metrics import Accuracy
 from loss import CategoricalCrossEntropy
@@ -19,7 +19,19 @@ class MultiLayerPerceptron(object):
         self.loss_function = loss_function()
         self.hidden_layers = []
         self.learning_rate = lr
-    
+        
+    def __str__(self) -> str:
+        output = "\n"
+        for index, layer in enumerate(self.hidden_layers):
+            output += f"{type(layer).__name__} {index+1}\n"
+            output += f"Dimensions:\t{layer.weights.shape}\n"
+            output += f"Parameters:\t{layer.weights.shape[0] * layer.weights.shape[0] + layer.biases.shape[0] * layer.biases.shape[1]}\n"
+            output += f"Activation:\t{type(layer.activation).__name__}\n\n"
+        output += f"Loss function:\t{type(self.loss_function).__name__}\n"
+        output += f"Metric:\t{type(self.metric).__name__}\n"
+        return output
+        
+        
     def add_dense(self, weights, biases, activation) -> None:      
         self.hidden_layers.append(HiddenLayer(weights,biases,activation))
                     
@@ -37,58 +49,47 @@ class MultiLayerPerceptron(object):
        
     def forward_propagate(self) -> np.ndarray:
         self.predicted_output = self.input
-        for z in self.hidden_layers:
-            self.predicted_output = z.forward_propagate(self.predicted_output)
+        for layer in self.hidden_layers:
+            self.predicted_output = layer.forward_propagate(self.predicted_output)
         return self.predicted_output
-     
-    def backward_propogate(self) -> None:      
-        self.hidden_layers.reverse()
-        self.d_weights = []
-        self.d_biases = []
-        self.dz = self.predicted_output - self.actual_output
+    
+    
+    def backward_propagate(self) -> None:
+        # Calculate initial error gradient
+        #self.dz = self.predicted_output - self.actual_output
+        self.dz = self.loss_function.cost_derivative(self.actual_output, self.predicted_output)
         
-        for i in range(len(self.hidden_layers)):
-            n = self.hidden_layers[i]
-            if i != 0:
-                self.w = self.hidden_layers[i-1].weights
-                self.dz = np.dot(self.dz, self.w.T) * n.activation.backward(n.a)
-            self.dw = np.dot(self.dz.T, n.input)
+        for i in range(len(self.hidden_layers) - 1, -1, -1):
+            layer = self.hidden_layers[i]
+            
+            if i < len(self.hidden_layers) - 1:
+                next_layer = self.hidden_layers[i + 1]
+                self.dz = np.dot(self.dz, next_layer.weights.T) * layer.activation.backward(layer.z)
+            
+            self.dw = np.dot(layer.x.T, self.dz)
             self.db = np.sum(self.dz, axis=0, keepdims=True)
-        self.d_weights.append(self.dw)
-        self.d_biases.append(self.db)
-        
-        self.hidden_layers.reverse()
-        self.d_weights.reverse()
-        self.d_biases.reverse()
-        
-        for w,b,n in zip(self.d_weights, self.d_biases, self.hidden_layers):
-            n.weights = n.weights - self.learning_rate * w.T
-            n.biases = n.biases - self.learning_rate * b
-        
-
+        layer.weights -= self.learning_rate * self.dw
+        layer.biases -= self.learning_rate * self.db
+        """
+        for i in range(len(self.hidden_layers) - 1, -1, -1):
+            layer = self.hidden_layers[i]
+            
+            #
+            self.dz = layer.activation.backward(layer.a)
+            #
+            
+            self.dw = np.dot(layer.x.T, self.dz)
+            self.db = np.sum(self.dz, axis=0, keepdims=True)
+            self.dz = np.dot(self.dz, layer.weights.T)# * layer.activation.backward(layer.z)
+        layer.weights -= self.learning_rate * self.dw
+        layer.biases -= self.learning_rate * self.db
+        """
+     
        
     def fit_model(self) -> None:
         self.forward_propagate()
-        self.backward_propogate()
+        self.backward_propagate()
         
-    def optimize_model(self, input, output, iterations, update_interval, cycles,batch=True) -> None:
-        self.metric.set_zero()
-        if batch:
-            for c in range(cycles):
-                for batch, (i, o) in enumerate(zip(input,output)):
-                    self.set_data(i, o)
-                    for epoch in range(1,iterations+1):
-                        self.fit_model()
-                        if max(epoch,1) % (iterations/update_interval) == 0:
-                            print(f'Cycle: {c+1}/{cycles}\t | Batch: {batch+1}/{len(input)}\t | Epoch: {epoch}\t | {self.get_statistics()}')
-        else:
-            for c in range(cycles):
-                self.set_data(input,output)
-                for epoch in range(1, iterations+1):
-                    self.fit_model()
-                    if max(epoch,1) % (iterations/update_interval) == 0:
-                        print(f'Cycle: {c+1}/{cycles}\t | Epoch: {epoch}\t | {self.get_statistics()}')
-        self.metric.set_zero()
   
     def get_prediction(self,x) -> np.ndarray:
         if len(x.shape) != 1:
@@ -103,21 +104,8 @@ class MultiLayerPerceptron(object):
     def get_statistics(self) -> str:
         # Returns the current network loss, prediction confidence, and specified metric.
         # Requires at least one iteration of the forward_propagate function.
-        self.loss_function.get(self.actual_output,self.predicted_output)
+        self.loss_function.cost(self.actual_output,self.predicted_output)
         self.metric.evaluate(self.get_prediction(self.actual_output), self.get_prediction(self.predicted_output)) 
-        return (f'Loss: {np.round(self.loss_function.cost,6)}\t | Confidence: {np.round(np.mean(self.get_confidence()),6)}\t | {type(self.metric).__name__}: {np.round(self.metric.get(),6)}')
+        return (f'Loss: {self.loss_function.loss:.4f}\t | Confidence: {np.mean(self.get_confidence()):.4f}\t | {type(self.metric).__name__}: {self.metric.get():.2f}')
     
-    def get_network_information(self) -> None:
-        # Provides a summary of the network parameters. 
-        for i, k in enumerate(self.hidden_layers):
-            print(f'Type: {type(k).__name__} {i+1} |Shape: {k.weights.shape}\t | Parameters: {k.weights.shape[0] * k.weights.shape[0] + k.biases.shape[0] * k.biases.shape[1]}\t | Activation: {type(k.activation).__name__}')
-        print(f'Loss function: {type(self.loss_function).__name__}')
-        print(f'Metric: {type(self.metric).__name__}')
-                 
-    def save_model(self,file) -> None:
-        with open(file,'wb') as file:
-            pickle.dump(self,file)
-            
-    def load_model(file):
-        with open(file,'rb') as file:
-            return  pickle.load(file)
+    
